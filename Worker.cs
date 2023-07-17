@@ -1,5 +1,6 @@
 using EchoService.Configuration;
 using Majordomo;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetMQ;
 
@@ -18,21 +19,30 @@ namespace EchoService
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await Start(stoppingToken);
+
+            Thread workerThread = new Thread(async () => {await Start(stoppingToken); });
+     
+            workerThread.Start();
+
+            stoppingToken.Register(() =>
+            {
+                workerThread.Join();
+                _logger.LogInformation($"Worker service token is canceled");
+            });
+
 
         }
         private async Task Start(CancellationToken stoppingToken)
         {
-            await Task.Factory.StartNew(async () =>
-            {
-                var id = new[] { (byte)_workerConfig.WorkerIdPrefix, (byte)_workerConfig.WorkerNumber };
+              var id = new[] { (byte)_workerConfig.WorkerIdPrefix, (byte)_workerConfig.WorkerNumber };
                 try
                 {
                     // create worker offering the service 'echo'
                     using var session = new MDPWorker($"tcp://{_workerConfig.BrokerAddress}:{_workerConfig.BrokerPort}", _workerConfig.ServiceName, id);
                     session.HeartbeatDelay = TimeSpan.FromMilliseconds(2500);
-                    // logging info to be displayed on screen
-                    session.LogInfoReady += (s, e) => _logger.LogInformation("{0}", e.Info);
+                // logging info to be displayed on screen
+                _logger.LogInformation($"{_workerConfig.ServiceName} {_workerConfig.WorkerIdPrefix} {_workerConfig.WorkerNumber} is started");
+                session.LogInfoReady += (s, e) => _logger.LogDebug("{0}", e.Info);
                     // there is no initial reply
                     NetMQMessage reply = null;
 
@@ -41,7 +51,7 @@ namespace EchoService
                     {
                         // send the reply and wait for a request
                         var request = await session.TryReceive(reply, stoppingToken);
-                        _logger.LogDebug("Received: {0}", request);
+                        _logger.LogInformation("Received and Reply: {0}", request?.ToString());
 
                         // was the worker interrupted
                         if (request is null)
@@ -59,7 +69,6 @@ namespace EchoService
                     _logger.LogError($"{ex.StackTrace}");
                 }
 
-            });
+            }
         }
-    }
 }
