@@ -1,8 +1,10 @@
+using Application.Domain;
 using EchoService.Configuration;
+using FunctionExtensions.Result;
 using Majordomo;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetMQ;
+using Error = Application.Domain.Error;
 
 namespace EchoService
 {
@@ -19,17 +21,19 @@ namespace EchoService
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-
-            Thread workerThread = new Thread(async () => {await Start(stoppingToken); });
-     
-            workerThread.Start();
-
-            stoppingToken.Register(() =>
+            await Task.Run(() =>
             {
-                workerThread.Join();
-                _logger.LogInformation($"Worker service token is canceled");
-            });
+                Thread workerThread = new Thread(async () => { await Start(stoppingToken); });
 
+                workerThread.Start();
+
+                stoppingToken.Register(() =>
+                {
+                    workerThread.Join();
+                    _logger.LogInformation($"Worker service token is canceled");
+                });
+            });
+           
 
         }
         private async Task Start(CancellationToken stoppingToken)
@@ -56,8 +60,12 @@ namespace EchoService
                         // was the worker interrupted
                         if (request is null)
                             break;
-                        // echo the request b 
-                        reply = request;
+                    // echo the request b 
+                    Error error = Errors.General.InternalServerError("exception");
+
+                    error.Serialize();
+
+                    reply = request;
 
                     }
                     session.Stop();
